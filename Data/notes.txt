@@ -1,0 +1,9 @@
+My name is Joey and I am building a local LLM UI called ChatOS Lite.
+I have an RTX 4090 GPU and I am running Ubuntu.
+I want my AI to be able to read my own notes using RAG. 
+
+My dogs name is Ellie
+
+My house is red
+
+I speak spanish

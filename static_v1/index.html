@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Local Chat v2 (Docs + Web)</title>
+  <style>
+    body {
+      background: #050505;
+      color: #ddd;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 0;
+      padding: 20px;
+    }
+    #app {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    #chat {
+      border: 1px solid #333;
+      padding: 10px;
+      height: 480px;
+      overflow-y: auto;
+      background: #111;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    .msg {
+      margin-bottom: 8px;
+      white-space: pre-wrap;
+    }
+    .msg strong {
+      color: #8fff8f;
+    }
+    .msg.user strong {
+      color: #82aaff;
+    }
+    #controls {
+      margin-top: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      font-size: 14px;
+    }
+    #user_input {
+      width: 100%;
+      box-sizing: border-box;
+      margin-top: 10px;
+      background: #0b0b0b;
+      color: #eee;
+      border: 1px solid #444;
+      padding: 6px;
+      border-radius: 4px;
+      resize: vertical;
+      min-height: 60px;
+    }
+    button {
+      background: #2b8cff;
+      border: none;
+      color: #fff;
+      padding: 6px 14px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+    select, input[type="checkbox"] {
+      background: #111;
+      color: #eee;
+      border: 1px solid #444;
+      border-radius: 4px;
+      padding: 2px 4px;
+    }
+    #status {
+      margin-top: 6px;
+      font-size: 12px;
+      color: #888;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <h1>Local Chat v2 (Docs + Web)</h1>
+
+    <div id="chat"></div>
+
+    <div id="controls">
+      <div>
+        <label for="model">Model:</label>
+        <select id="model">
+          <option value="qwen2.5:7b">Qwen 2.5 7B</option>
+          <option value="qwen2.5:14b">Qwen 2.5 14B</option>
+          <option value="qwen2.5:latest">Qwen 2.5 (latest)</option>
+          <option value="qwen3:14b">Qwen 3 14B</option>
+          <option value="qwen3:30b">Qwen 3 30B</option>
+          <option value="llama3.1:latest">Llama 3.1 (latest)</option>
+          <option value="mixtral:8x7b">Mixtral 8x7B</option>
+        </select>
+      </div>
+
+      <label>
+        <input type="checkbox" id="use_docs" />
+        Use docs
+      </label>
+
+      <label>
+        <input type="checkbox" id="use_web" />
+        Use web search
+      </label>
+
+      <button id="send_btn">Send</button>
+      <button id="clear_btn">Clear</button>
+    </div>
+
+    <textarea id="user_input" placeholder="Type a message and press Enter (or click Send)..."></textarea>
+
+    <div id="status">Ready.</div>
+  </div>
+
+  <script>
+    const chatEl   = document.getElementById("chat");
+    const inputEl  = document.getElementById("user_input");
+    const sendBtn  = document.getElementById("send_btn");
+    const clearBtn = document.getElementById("clear_btn");
+    const modelEl  = document.getElementById("model");
+    const docsEl   = document.getElementById("use_docs");
+    const webEl    = document.getElementById("use_web");
+    const statusEl = document.getElementById("status");
+
+    let chatHistory = [];
+    let isSending = false;
+
+    function appendMessage(role, content) {
+      const div = document.createElement("div");
+      div.className = "msg " + role;
+      const who = document.createElement("strong");
+      who.textContent = role === "user" ? "You: " : "AI: ";
+      div.appendChild(who);
+      const span = document.createElement("span");
+      span.textContent = content;
+      div.appendChild(span);
+      chatEl.appendChild(div);
+      chatEl.scrollTop = chatEl.scrollHeight;
+      return span;
+    }
+
+    function setUIBusy(busy) {
+      isSending = busy;
+      sendBtn.disabled = busy;
+      modelEl.disabled = busy;
+      docsEl.disabled  = busy;
+      webEl.disabled   = busy;
+      statusEl.textContent = busy
+        ? `Running ${modelEl.value}...`
+        : "Ready.";
+    }
+
+    async function sendMessage() {
+      if (isSending) return;
+
+      const text = inputEl.value.trim();
+      if (!text) return;
+
+      inputEl.value = "";
+      const userMsg = { role: "user", content: text };
+      chatHistory.push(userMsg);
+      appendMessage("user", text);
+
+      const assistantSpan = appendMessage("assistant", "");
+      let assistantText = "";
+
+      const body = {
+        messages: chatHistory,
+        model: modelEl.value,
+        use_docs: docsEl.checked,
+        use_web: webEl.checked
+      };
+
+      setUIBusy(true);
+
+      try {
+        const resp = await fetch("/api/chat-stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        });
+
+        if (!resp.ok || !resp.body) {
+          assistantSpan.textContent = "[Error: no response body]";
+          setUIBusy(false);
+          return;
+        }
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          assistantText += chunk;
+          assistantSpan.textContent = assistantText;
+          chatEl.scrollTop = chatEl.scrollHeight;
+        }
+
+        chatHistory.push({ role: "assistant", content: assistantText });
+      } catch (err) {
+        console.error(err);
+        assistantSpan.textContent = "[Error: " + err + "]";
+      } finally {
+        setUIBusy(false);
+      }
+    }
+
+    function clearChat() {
+      chatHistory = [];
+      chatEl.innerHTML = "";
+      statusEl.textContent = "Cleared. Ready.";
+    }
+
+    sendBtn.addEventListener("click", sendMessage);
+    clearBtn.addEventListener("click", clearChat);
+
+    inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+  </script>
+</body>
+</html>
