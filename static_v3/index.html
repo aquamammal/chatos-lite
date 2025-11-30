@@ -39,6 +39,7 @@
     .msg.user strong {
       color: #82aaff;
     }
+
     #controls {
       margin-top: 10px;
       display: flex;
@@ -90,6 +91,19 @@
       font-size: 12px;
       color: #888;
     }
+
+    /* Timeout / web-status bar directly under chat */
+    #timeout-indicator {
+      display: none;
+      margin-top: 6px;
+      margin-bottom: 6px;
+      padding: 8px 10px;
+      border-radius: 4px;
+      font-size: 13px;
+      font-weight: bold;
+      border: 1px solid transparent;
+    }
+
     @media (max-width: 700px) {
       #controls {
         flex-direction: column;
@@ -103,6 +117,9 @@
     <h1>Local Chat v3 (Docs + Brave Web)</h1>
 
     <div id="chat"></div>
+
+    <!-- Visible timeout / web-status bar -->
+    <div id="timeout-indicator"></div>
 
     <div id="controls">
       <div>
@@ -159,24 +176,25 @@
   </div>
 
   <script>
-    const chatEl   = document.getElementById("chat");
-    const inputEl  = document.getElementById("user_input");
-    const sendBtn  = document.getElementById("send_btn");
-    const clearBtn = document.getElementById("clear_btn");
-    const modelEl  = document.getElementById("model");
-    const docsEl   = document.getElementById("use_docs");
-    const webEl    = document.getElementById("use_web");
-    const statusEl = document.getElementById("status");
+    const chatEl      = document.getElementById("chat");
+    const inputEl     = document.getElementById("user_input");
+    const sendBtn     = document.getElementById("send_btn");
+    const clearBtn    = document.getElementById("clear_btn");
+    const modelEl     = document.getElementById("model");
+    const docsEl      = document.getElementById("use_docs");
+    const webEl       = document.getElementById("use_web");
+    const statusEl    = document.getElementById("status");
+    const timeoutEl   = document.getElementById("timeout-indicator");
 
     let chatHistory = [];
-    let isSending = false;
+    let isSending   = false;
 
     function currentModeText() {
       const useDocs = docsEl.checked;
       const useWeb  = webEl.checked;
       if (useDocs && useWeb) return "docs + web";
       if (useDocs) return "docs only";
-      if (useWeb) return "web only";
+      if (useWeb)  return "web only";
       return "base model";
     }
 
@@ -195,16 +213,41 @@
     }
 
     function setUIBusy(busy) {
-      isSending = busy;
-      sendBtn.disabled = busy;
-      modelEl.disabled = busy;
-      docsEl.disabled  = busy;
-      webEl.disabled   = busy;
+      isSending          = busy;
+      sendBtn.disabled   = busy;
+      modelEl.disabled   = busy;
+      docsEl.disabled    = busy;
+      webEl.disabled     = busy;
       if (busy) {
         statusEl.textContent = `Running ${modelEl.value} (mode: ${currentModeText()})...`;
       } else {
         statusEl.textContent = `Ready. Mode: ${currentModeText()}.`;
       }
+    }
+
+    function showTimeoutMessage(text, kind) {
+      if (!timeoutEl) return;
+      timeoutEl.textContent = text;
+      timeoutEl.style.display = "block";
+      if (kind === "timeout") {
+        timeoutEl.style.background = "#550000";
+        timeoutEl.style.color = "#ffdddd";
+        timeoutEl.style.borderColor = "#ff5555";
+      } else if (kind === "ok") {
+        timeoutEl.style.background = "#003905";
+        timeoutEl.style.color = "#c8ffcf";
+        timeoutEl.style.borderColor = "#33aa55";
+      } else {
+        timeoutEl.style.background = "#222";
+        timeoutEl.style.color = "#ddd";
+        timeoutEl.style.borderColor = "#555";
+      }
+    }
+
+    function clearTimeoutMessage() {
+      if (!timeoutEl) return;
+      timeoutEl.style.display = "none";
+      timeoutEl.textContent = "";
     }
 
     async function sendMessage() {
@@ -229,6 +272,7 @@
       };
 
       setUIBusy(true);
+      clearTimeoutMessage();
 
       try {
         const resp = await fetch("/api/chat-stream", {
@@ -237,13 +281,29 @@
           body: JSON.stringify(body)
         });
 
+        // Read timeout indicator from response headers (if backend set it)
+        const timeoutHeader = resp.headers.get("X-Web-Timeout");
+
+        if (body.use_web) {
+          if (timeoutHeader === "1") {
+            showTimeoutMessage("⚠️ Web search TIMED OUT (Brave didn’t respond in time).", "timeout");
+          } else if (timeoutHeader === "0") {
+            showTimeoutMessage("🌐 Web search used (Brave response or cache).", "ok");
+          } else {
+            // web enabled but header missing -> unknown state
+            showTimeoutMessage("ℹ️ Web search status unknown (no timeout header).", "neutral");
+          }
+        } else {
+          clearTimeoutMessage();
+        }
+
         if (!resp.ok || !resp.body) {
           assistantSpan.textContent = "[Error: no response body]";
           setUIBusy(false);
           return;
         }
 
-        const reader = resp.body.getReader();
+        const reader  = resp.body.getReader();
         const decoder = new TextDecoder("utf-8");
 
         while (true) {
@@ -267,6 +327,7 @@
     function clearChat() {
       chatHistory = [];
       chatEl.innerHTML = "";
+      clearTimeoutMessage();
       statusEl.textContent = "Cleared. Ready. Mode: " + currentModeText() + ".";
     }
 
@@ -282,4 +343,3 @@
   </script>
 </body>
 </html>
-

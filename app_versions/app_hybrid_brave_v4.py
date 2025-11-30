@@ -44,7 +44,7 @@ WEB_CACHE: Dict[str, str] = {}
 # Web timeout flag for last Brave call:
 # - True  -> Brave timed out after retries
 # - False -> Brave used successfully (API or cache) / no timeout
-# - None  -> Brave not used / not applicable / API key missing
+# - None  -> Brave not used / not applicable / API key missing / non-timeout error
 WEB_TIMEOUT_LAST_CALL: Optional[bool] = None
 
 
@@ -67,6 +67,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     model: str
+    web_timeout: Optional[bool] = None  # exposes timeout info on non-stream endpoint
 
 
 # ------------------------------------------------
@@ -246,7 +247,7 @@ def ensure_loaded(use_docs: bool) -> None:
 
 
 # ------------------------------------------------
-# Web search via Brave API (with retries, caching, logging)
+# Web search via Brave API (with retries, caching, logging, timeout indicator)
 # ------------------------------------------------
 
 def web_search_brave(question: str, max_results: int = 3) -> str:
@@ -256,7 +257,7 @@ def web_search_brave(question: str, max_results: int = 3) -> str:
       - in-memory caching
       - retries with backoff
       - detailed logging (including exact result block)
-      - sets WEB_TIMEOUT_LAST_CALL for frontend timeout indicator
+      - sets WEB_TIMEOUT_LAST_CALL for timeout indicator
     """
     global WEB_TIMEOUT_LAST_CALL
 
@@ -468,8 +469,13 @@ def get_model_name(req: ChatRequest) -> str:
 
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
+    global WEB_TIMEOUT_LAST_CALL
+
     base_msgs = [{"role": m.role, "content": m.content} for m in req.messages]
     msgs = maybe_add_hybrid_context(base_msgs, req.use_docs, req.use_web)
+
+    # Snapshot timeout flag right after context-building (this is when Brave is called)
+    web_timeout_flag = WEB_TIMEOUT_LAST_CALL if req.use_web else None
 
     model = get_model_name(req)
     payload = {
@@ -483,7 +489,7 @@ def chat(req: ChatRequest):
     data = r.json()
 
     answer = data["message"]["content"]
-    return ChatResponse(answer=answer, model=model)
+    return ChatResponse(answer=answer, model=model, web_timeout=web_timeout_flag)
 
 
 @app.post("/api/chat-stream")
@@ -501,8 +507,7 @@ def chat_stream(req: ChatRequest):
     msgs = maybe_add_hybrid_context(base_msgs, req.use_docs, req.use_web)
 
     # Snapshot the timeout flag right after building context
-    # (this is when Brave is called, if enabled)
-    web_timeout_flag = WEB_TIMEOUT_LAST_CALL
+    web_timeout_flag = WEB_TIMEOUT_LAST_CALL if req.use_web else None
 
     model = get_model_name(req)
 
@@ -541,5 +546,5 @@ def chat_stream(req: ChatRequest):
 
 if __name__ == "__main__":
     import uvicorn
+    # NOTE: change "app_hybrid_brave_v3" to this file's name (without .py) if needed
     uvicorn.run("app_hybrid_brave_v3:app", host="127.0.0.1", port=8001, reload=True)
-
