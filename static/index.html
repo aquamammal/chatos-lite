@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Local Chat (Dynamic Models + RAG)</title>
+  <title>Local Chat v3 (Docs + Brave Web)</title>
   <style>
     body {
       background: #050505;
@@ -14,6 +14,11 @@
     #app {
       max-width: 900px;
       margin: 0 auto;
+    }
+    h1 {
+      margin-top: 0;
+      margin-bottom: 12px;
+      font-size: 24px;
     }
     #chat {
       border: 1px solid #333;
@@ -34,6 +39,7 @@
     .msg.user strong {
       color: #82aaff;
     }
+
     #controls {
       margin-top: 10px;
       display: flex;
@@ -53,6 +59,8 @@
       border-radius: 4px;
       resize: vertical;
       min-height: 60px;
+      font-family: inherit;
+      font-size: 14px;
     }
     button {
       background: #2b8cff;
@@ -73,61 +81,122 @@
       border-radius: 4px;
       padding: 2px 4px;
     }
+    label {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
     #status {
       margin-top: 6px;
       font-size: 12px;
       color: #888;
     }
+
+    /* Timeout / web-status bar directly under chat */
+    #timeout-indicator {
+      display: none;
+      margin-top: 6px;
+      margin-bottom: 6px;
+      padding: 8px 10px;
+      border-radius: 4px;
+      font-size: 13px;
+      font-weight: bold;
+      border: 1px solid transparent;
+    }
+
+    @media (max-width: 700px) {
+      #controls {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+    }
   </style>
 </head>
 <body>
   <div id="app">
-    <h1>Local Chat</h1>
+    <h1>Local Chat v3 (Docs + Brave Web)</h1>
 
     <div id="chat"></div>
+
+    <!-- Visible timeout / web-status bar -->
+    <div id="timeout-indicator"></div>
 
     <div id="controls">
       <div>
         <label for="model">Model:</label>
-        <select id="model">
-          <!-- Chat models you actually have installed -->
-          <option value="qwen2.5:7b">Qwen 2.5 7B</option>
-          <option value="qwen2.5:14b">Qwen 2.5 14B</option>
-          <option value="qwen2.5:latest">Qwen 2.5 (latest)</option>
-          <option value="qwen3:14b">Qwen 3 14B</option>
-          <option value="qwen3:30b">Qwen 3 30B</option>
-          <option value="llama3.1:latest">Llama 3.1 (latest)</option>
-          <option value="mixtral:8x7b">Mixtral 8x7B</option>
-          <!-- NOTE: nomic-embed-text is an embedding model, not a chat model,
-               so we intentionally do NOT include it here. -->
+        <select id="model" autocomplete="off">
+          <!-- Big / heavy models -->
+          <option value="qwen3:30b" selected>qwen3:30b</option>
+          <option value="dolphin70:latest">dolphin70:latest (Dolphin 70B Q4_K_M)</option>
+          <option value="dolphin-llama3:70b-v2.9-q4_K_M">dolphin-llama3:70b-v2.9-q4_K_M</option>
+          <option value="dolphin-llama3:70b">dolphin-llama3:70b</option>
+          <option value="qwen3:14b">qwen3:14b</option>
+          <option value="mixtral:8x7b">mixtral:8x7b</option>
+
+          <!-- Mid-size chat models -->
+          <option value="mistral-small:24b-instruct-2501-q4_K_M">mistral-small:24b-instruct-2501-q4_K_M</option>
+          <option value="dolphin-mixtral:latest">dolphin-mixtral:latest</option>
+          <option value="dolphin-mistral:latest">dolphin-mistral:latest</option>
+          <option value="dolphin-llama3:latest">dolphin-llama3:latest</option>
+          <option value="llama3.1:latest">llama3.1:latest</option>
+          <option value="llama2-uncensored:latest">llama2-uncensored:latest</option>
+          <option value="wizardlm-uncensored:latest">wizardlm-uncensored:latest</option>
+          <option value="wizard-vicuna-uncensored:latest">wizard-vicuna-uncensored:latest</option>
+
+          <!-- Qwen 2.5 family -->
+          <option value="qwen2.5:14b">qwen2.5:14b</option>
+          <option value="qwen2.5:7b">qwen2.5:7b</option>
+          <option value="qwen2.5:latest">qwen2.5:latest</option>
+
+          <!-- Embedding model (usually NOT for chat, but listed just in case) -->
+          <option value="nomic-embed-text:latest">nomic-embed-text:latest (embeddings)</option>
         </select>
       </div>
 
       <label>
-        <input type="checkbox" id="use_rag" />
+        <input type="checkbox" id="use_docs" />
         Use docs (RAG)
+      </label>
+
+      <label>
+        <input type="checkbox" id="use_web" />
+        Use Brave web
       </label>
 
       <button id="send_btn">Send</button>
       <button id="clear_btn">Clear</button>
     </div>
 
-    <textarea id="user_input" placeholder="Type a message and press Enter (or click Send)..."></textarea>
+    <textarea
+      id="user_input"
+      placeholder="Type a message and press Enter (or click Send)..."
+    ></textarea>
 
-    <div id="status">Ready.</div>
+    <div id="status">Ready. Mode: base model.</div>
   </div>
 
   <script>
-    const chatEl   = document.getElementById("chat");
-    const inputEl  = document.getElementById("user_input");
-    const sendBtn  = document.getElementById("send_btn");
-    const clearBtn = document.getElementById("clear_btn");
-    const modelEl  = document.getElementById("model");
-    const ragEl    = document.getElementById("use_rag");
-    const statusEl = document.getElementById("status");
+    const chatEl      = document.getElementById("chat");
+    const inputEl     = document.getElementById("user_input");
+    const sendBtn     = document.getElementById("send_btn");
+    const clearBtn    = document.getElementById("clear_btn");
+    const modelEl     = document.getElementById("model");
+    const docsEl      = document.getElementById("use_docs");
+    const webEl       = document.getElementById("use_web");
+    const statusEl    = document.getElementById("status");
+    const timeoutEl   = document.getElementById("timeout-indicator");
 
     let chatHistory = [];
-    let isSending = false;
+    let isSending   = false;
+
+    function currentModeText() {
+      const useDocs = docsEl.checked;
+      const useWeb  = webEl.checked;
+      if (useDocs && useWeb) return "docs + web";
+      if (useDocs) return "docs only";
+      if (useWeb)  return "web only";
+      return "base model";
+    }
 
     function appendMessage(role, content) {
       const div = document.createElement("div");
@@ -140,17 +209,45 @@
       div.appendChild(span);
       chatEl.appendChild(div);
       chatEl.scrollTop = chatEl.scrollHeight;
-      return span; // for streaming updates
+      return span;
     }
 
     function setUIBusy(busy) {
-      isSending = busy;
-      sendBtn.disabled = busy;
-      modelEl.disabled = busy;
-      ragEl.disabled = busy;
-      statusEl.textContent = busy
-        ? `Running ${modelEl.value}...`
-        : "Ready.";
+      isSending          = busy;
+      sendBtn.disabled   = busy;
+      modelEl.disabled   = busy;
+      docsEl.disabled    = busy;
+      webEl.disabled     = busy;
+      if (busy) {
+        statusEl.textContent = `Running ${modelEl.value} (mode: ${currentModeText()})...`;
+      } else {
+        statusEl.textContent = `Ready. Mode: ${currentModeText()}.`;
+      }
+    }
+
+    function showTimeoutMessage(text, kind) {
+      if (!timeoutEl) return;
+      timeoutEl.textContent = text;
+      timeoutEl.style.display = "block";
+      if (kind === "timeout") {
+        timeoutEl.style.background = "#550000";
+        timeoutEl.style.color = "#ffdddd";
+        timeoutEl.style.borderColor = "#ff5555";
+      } else if (kind === "ok") {
+        timeoutEl.style.background = "#003905";
+        timeoutEl.style.color = "#c8ffcf";
+        timeoutEl.style.borderColor = "#33aa55";
+      } else {
+        timeoutEl.style.background = "#222";
+        timeoutEl.style.color = "#ddd";
+        timeoutEl.style.borderColor = "#555";
+      }
+    }
+
+    function clearTimeoutMessage() {
+      if (!timeoutEl) return;
+      timeoutEl.style.display = "none";
+      timeoutEl.textContent = "";
     }
 
     async function sendMessage() {
@@ -170,10 +267,12 @@
       const body = {
         messages: chatHistory,
         model: modelEl.value,
-        use_rag: ragEl.checked
+        use_docs: docsEl.checked,
+        use_web: webEl.checked
       };
 
       setUIBusy(true);
+      clearTimeoutMessage();
 
       try {
         const resp = await fetch("/api/chat-stream", {
@@ -182,13 +281,29 @@
           body: JSON.stringify(body)
         });
 
+        // Read timeout indicator from response headers (if backend set it)
+        const timeoutHeader = resp.headers.get("X-Web-Timeout");
+
+        if (body.use_web) {
+          if (timeoutHeader === "1") {
+            showTimeoutMessage("⚠️ Web search TIMED OUT (Brave didn’t respond in time).", "timeout");
+          } else if (timeoutHeader === "0") {
+            showTimeoutMessage("🌐 Web search used (Brave response or cache).", "ok");
+          } else {
+            // web enabled but header missing -> unknown state
+            showTimeoutMessage("ℹ️ Web search status unknown (no timeout header).", "neutral");
+          }
+        } else {
+          clearTimeoutMessage();
+        }
+
         if (!resp.ok || !resp.body) {
           assistantSpan.textContent = "[Error: no response body]";
           setUIBusy(false);
           return;
         }
 
-        const reader = resp.body.getReader();
+        const reader  = resp.body.getReader();
         const decoder = new TextDecoder("utf-8");
 
         while (true) {
@@ -212,7 +327,8 @@
     function clearChat() {
       chatHistory = [];
       chatEl.innerHTML = "";
-      statusEl.textContent = "Cleared. Ready.";
+      clearTimeoutMessage();
+      statusEl.textContent = "Cleared. Ready. Mode: " + currentModeText() + ".";
     }
 
     sendBtn.addEventListener("click", sendMessage);
@@ -223,6 +339,12 @@
         e.preventDefault();
         sendMessage();
       }
+    });
+
+    // Force qwen3:30b as default every time the page loads,
+    // even if the browser tries to restore an old selection.
+    window.addEventListener("DOMContentLoaded", () => {
+      modelEl.value = "qwen3:30b";
     });
   </script>
 </body>
